@@ -1,0 +1,14 @@
+bin/
+*.db
+*.sqlite
+.env
+.env.local
+.git/
+.gitignore
+.idea/
+.vscode/
+.claude/
+.DS_Store
+CLAUDE.md
+CLAUDE.local.md
+requirments.md

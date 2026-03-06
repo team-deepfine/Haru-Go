@@ -1,4 +1,4 @@
-.PHONY: build run test lint clean tidy fmt
+.PHONY: build run test lint clean tidy fmt docker-up docker-down docker-logs
 
 APP_NAME := haru
 BUILD_DIR := ./bin
@@ -23,3 +23,12 @@ tidy:
 
 fmt:
 	gofmt -w .
+
+docker-up:
+	docker compose up --build -d
+
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f
