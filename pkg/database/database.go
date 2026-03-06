@@ -1,0 +1,40 @@
+package database
+
+import (
+	"fmt"
+	"log/slog"
+
+	"github.com/daewon/haru/config"
+	"gorm.io/driver/postgres"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+)
+
+// New creates a new GORM database connection based on configuration.
+func New(cfg *config.Config) (*gorm.DB, error) {
+	var dialector gorm.Dialector
+
+	switch cfg.DBDriver {
+	case "postgres":
+		if cfg.DatabaseURL == "" {
+			return nil, fmt.Errorf("DATABASE_URL is required for postgres driver")
+		}
+		dialector = postgres.Open(cfg.DatabaseURL)
+		slog.Info("using PostgreSQL database")
+	case "sqlite":
+		dialector = sqlite.Open("haru.db")
+		slog.Info("using SQLite database (development mode)")
+	default:
+		return nil, fmt.Errorf("unsupported DB_DRIVER: %s", cfg.DBDriver)
+	}
+
+	db, err := gorm.Open(dialector, &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+
+	return db, nil
+}
