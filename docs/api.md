@@ -40,7 +40,95 @@ GET /health
 
 ### 1. Apple 로그인
 
-Apple Sign In SDK에서 받은 `id_token`을 서버에 전달하면, 서버가 Apple 공개키로 검증 후 사용자를 조회/생성하고 JWT 토큰 쌍을 발급합니다.
+Apple Sign In에서 받은 authorization code를 서버에 전달하면, 서버가 Apple 토큰 엔드포인트에서 code를 교환하여 사용자를 조회/생성하고 JWT 토큰 쌍을 발급합니다.
+
+#### Apple Sign In Flow
+
+```
+┌───────────┐    ┌──────────────┐    ┌────────────────┐    ┌──────┐
+│ Web Client │    │ Apple Server │    │   Haru API     │    │  DB  │
+└─────┬─────┘    └──────┬───────┘    └───────┬────────┘    └──┬───┘
+      │                 │                     │                │
+      │  1. Sign in with Apple 버튼 클릭      │                │
+      │─── redirect ──>│                     │                │
+      │                 │                     │                │
+      │  2. 사용자 Apple ID 인증              │                │
+      │                 │                     │                │
+      │  3. Apple이 redirect_uri로 code 전달 (form_post)      │
+      │<── code ────────│                     │                │
+      │                 │                     │                │
+      │  4. POST /api/auth/apple              │                │
+      │     { "code": "<authorization_code>" }│                │
+      │──────────────────────────────────────>│                │
+      │                 │                     │                │
+      │                 │  5. code → token 교환│                │
+      │                 │<────────────────────│                │
+      │                 │    id_token 응답     │                │
+      │                 │────────────────────>│                │
+      │                 │                     │                │
+      │                 │            6. id_token에서            │
+      │                 │               sub, email 추출         │
+      │                 │                     │                │
+      │                 │                     │  7. 유저       │
+      │                 │                     │     조회/생성  │
+      │                 │                     │───────────────>│
+      │                 │                     │<───────────────│
+      │                 │                     │                │
+      │  8. 응답: accessToken, refreshToken, user              │
+      │<──────────────────────────────────────│                │
+      │                 │                     │                │
+```
+
+#### 로컬 테스트 환경 설정 (ngrok)
+
+Apple은 `localhost`를 Return URL로 허용하지 않으므로, ngrok으로 HTTPS 터널을 만들어야 합니다.
+
+**Step 1. ngrok 실행**
+
+```bash
+ngrok http 8080
+# → Forwarding: https://a1b2c3d4.ngrok-free.app → http://localhost:8080
+```
+
+**Step 2. Apple Developer Console 설정**
+
+[Apple Developer - Identifiers](https://developer.apple.com/account/resources/identifiers) 에서 **Services ID**를 생성합니다.
+
+| 항목 | 값 | 설명 |
+|------|-----|------|
+| Identifier | `com.yourteam.haru.web` | 이것이 `APPLE_CLIENT_ID`가 됨 (번들 ID 아님!) |
+| Sign In with Apple | Enable → Configure | |
+| Domains | `a1b2c3d4.ngrok-free.app` | ngrok 도메인 (`https://` 제외) |
+| Return URLs | `https://a1b2c3d4.ngrok-free.app/api/auth/apple/callback` | Apple이 code를 전달할 URL |
+
+**Step 3. .env 설정**
+
+```env
+APPLE_CLIENT_ID=com.yourteam.haru.web
+APPLE_TEAM_ID=XXXXXXXXXX
+APPLE_KEY_ID=YYYYYYYYYY
+APPLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nMIGT...\n-----END PRIVATE KEY-----
+APPLE_REDIRECT_URI=https://a1b2c3d4.ngrok-free.app/api/auth/apple/callback
+```
+
+> **주의:** `APPLE_REDIRECT_URI`는 Apple Developer Console의 Return URLs와 **정확히 일치**해야 합니다. ngrok을 재시작하면 도메인이 바뀌므로 Console과 `.env`를 함께 업데이트하세요.
+
+#### Apple 인증 URL
+
+클라이언트는 사용자를 아래 URL로 리다이렉트합니다:
+
+```
+https://appleid.apple.com/auth/authorize
+  ?client_id={APPLE_CLIENT_ID}
+  &redirect_uri={APPLE_REDIRECT_URI}
+  &response_type=code
+  &scope=email%20name
+  &response_mode=form_post
+```
+
+Apple 인증 후 `redirect_uri`로 authorization code가 `form_post`로 전달됩니다.
+
+#### API Endpoint
 
 ```
 POST /api/auth/apple
@@ -50,8 +138,7 @@ POST /api/auth/apple
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| idToken | string | O | Apple Sign In에서 받은 id_token (JWT) |
-| code | string | | Apple authorization code (현재 미사용) |
+| code | string | O | Apple에서 받은 authorization code |
 
 **Example**
 
@@ -59,7 +146,7 @@ POST /api/auth/apple
 curl -X POST http://localhost:8080/api/auth/apple \
   -H "Content-Type: application/json" \
   -d '{
-    "idToken": "eyJraWQiOiJmaDZCcz..."
+    "code": "c1a2b3d4e5f6..."
   }'
 ```
 
@@ -84,11 +171,13 @@ curl -X POST http://localhost:8080/api/auth/apple \
 
 | Status | 조건 |
 |--------|------|
-| 400 | `idToken` 누락 |
-| 401 | id_token 검증 실패 (서명 불일치, 만료 등) |
-| 502 | Apple 공개키 조회 실패 |
+| 400 | `code` 누락 |
+| 401 | authorization code가 유효하지 않음 (만료, 이미 사용됨) |
+| 502 | Apple 토큰 엔드포인트 통신 실패 |
 
-> **Note:** Apple은 최초 로그인 시에만 email을 제공합니다. 이후 로그인에서는 `sub`(사용자 ID)만 반환되므로, 최초 로그인 시 서버가 자동으로 email을 저장합니다.
+> **Note:**
+> - Apple authorization code는 **1회용**이며 발급 후 **5분 내**에 사용해야 합니다.
+> - Apple은 **최초 로그인 시에만** email을 제공합니다. 이후 로그인에서는 `sub`(사용자 ID)만 반환되므로, 최초 로그인 시 서버가 자동으로 email을 저장합니다.
 
 ---
 
@@ -568,7 +657,7 @@ curl -X POST http://localhost:8080/api/events/parse-voice \
 | startAt / endAt | 필수, ISO-8601 형식 (RFC 3339) |
 | endAt | startAt 이후여야 함 |
 | timezone | 유효한 IANA 타임존 식별자 |
-| idToken | Apple 로그인 시 필수 |
+| code | Apple 로그인 시 필수 (authorization code) |
 | refreshToken | 토큰 갱신 시 필수 |
 
 ---
@@ -627,10 +716,11 @@ curl -X POST http://localhost:8080/api/events/parse-voice \
 | `JWT_SECRET` | **O** | - | JWT 서명 비밀키 (미설정 시 서버 시작 차단) |
 | `JWT_ACCESS_EXPIRY` | X | `1h` | Access token 유효기간 |
 | `JWT_REFRESH_EXPIRY` | X | `720h` | Refresh token 유효기간 (30일) |
-| `APPLE_CLIENT_ID` | X | - | Apple App Bundle ID (e.g., `com.deepfine.haru`) |
+| `APPLE_CLIENT_ID` | X | - | Apple Services ID (e.g., `com.yourteam.haru.web`) |
 | `APPLE_TEAM_ID` | X | - | Apple Developer Team ID |
 | `APPLE_KEY_ID` | X | - | Apple Sign In Key ID |
-| `APPLE_PRIVATE_KEY` | X | - | Apple private key (PEM 문자열) |
+| `APPLE_PRIVATE_KEY` | X | - | Apple private key (.p8 파일의 PEM 문자열) |
+| `APPLE_REDIRECT_URI` | X | - | Apple Return URL (Apple Developer Console과 정확히 일치해야 함) |
 | `GEMINI_API_KEY` | X | - | Gemini API 키 (미설정 시 음성 파싱 502 반환) |
 | `GEMINI_MODEL` | X | `gemini-2.5-flash` | Gemini 모델명 |
 | `DEFAULT_TIMEZONE` | X | `Asia/Seoul` | 음성 파싱 기본 타임존 |
