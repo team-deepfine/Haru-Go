@@ -27,15 +27,20 @@ func init() {
 // --- Mock AuthService ---
 
 type mockAuthService struct {
-	appleLoginFn     func(ctx context.Context, idToken string) (*model.User, *jwt.TokenPair, error)
+	appleLoginFn     func(ctx context.Context, code string) (*model.User, *jwt.TokenPair, error)
+	kakaoLoginFn     func(ctx context.Context, code string) (*model.User, *jwt.TokenPair, error)
 	refreshTokenFn   func(ctx context.Context, refreshToken string) (*jwt.TokenPair, error)
 	logoutFn         func(ctx context.Context, userID uuid.UUID) error
 	getCurrentUserFn func(ctx context.Context, userID uuid.UUID) (*model.User, error)
 	deleteAccountFn  func(ctx context.Context, userID uuid.UUID) error
 }
 
-func (m *mockAuthService) AppleLogin(ctx context.Context, idToken string) (*model.User, *jwt.TokenPair, error) {
-	return m.appleLoginFn(ctx, idToken)
+func (m *mockAuthService) AppleLogin(ctx context.Context, code string) (*model.User, *jwt.TokenPair, error) {
+	return m.appleLoginFn(ctx, code)
+}
+
+func (m *mockAuthService) KakaoLogin(ctx context.Context, code string) (*model.User, *jwt.TokenPair, error) {
+	return m.kakaoLoginFn(ctx, code)
 }
 
 func (m *mockAuthService) RefreshToken(ctx context.Context, refreshToken string) (*jwt.TokenPair, error) {
@@ -108,14 +113,14 @@ func TestAppleLogin_ValidRequest(t *testing.T) {
 	tokenPair := newTestTokenPair()
 
 	svc := &mockAuthService{
-		appleLoginFn: func(_ context.Context, idToken string) (*model.User, *jwt.TokenPair, error) {
-			assert.Equal(t, "valid-id-token", idToken)
+		appleLoginFn: func(_ context.Context, code string) (*model.User, *jwt.TokenPair, error) {
+			assert.Equal(t, "valid-auth-code", code)
 			return user, tokenPair, nil
 		},
 	}
 
 	router := setupPublicRouter(svc)
-	reqBody := jsonBody(t, dto.AppleLoginRequest{IDToken: "valid-id-token"})
+	reqBody := jsonBody(t, dto.AppleLoginRequest{Code: "valid-auth-code"})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/apple", reqBody)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -136,11 +141,11 @@ func TestAppleLogin_ValidRequest(t *testing.T) {
 	assert.Equal(t, user.Email, resp.User.Email)
 }
 
-func TestAppleLogin_MissingIDToken(t *testing.T) {
+func TestAppleLogin_MissingCode(t *testing.T) {
 	svc := &mockAuthService{}
 	router := setupPublicRouter(svc)
 
-	// Send empty JSON body (no idToken field).
+	// Send empty JSON body (no code field).
 	reqBody := jsonBody(t, map[string]string{})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/apple", reqBody)
 	req.Header.Set("Content-Type", "application/json")
@@ -154,18 +159,18 @@ func TestAppleLogin_MissingIDToken(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &problem)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusBadRequest, problem.Status)
-	assert.Equal(t, "idToken is required", problem.Detail)
+	assert.Equal(t, "code is required", problem.Detail)
 }
 
-func TestAppleLogin_ServiceReturnsErrInvalidIDToken(t *testing.T) {
+func TestAppleLogin_ServiceReturnsErrInvalidAuthCode(t *testing.T) {
 	svc := &mockAuthService{
 		appleLoginFn: func(_ context.Context, _ string) (*model.User, *jwt.TokenPair, error) {
-			return nil, nil, model.ErrInvalidIDToken
+			return nil, nil, model.ErrInvalidAuthCode
 		},
 	}
 
 	router := setupPublicRouter(svc)
-	reqBody := jsonBody(t, dto.AppleLoginRequest{IDToken: "bad-token"})
+	reqBody := jsonBody(t, dto.AppleLoginRequest{Code: "bad-code"})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/apple", reqBody)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -178,7 +183,7 @@ func TestAppleLogin_ServiceReturnsErrInvalidIDToken(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &problem)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, problem.Status)
-	assert.Contains(t, problem.Detail, "invalid id token")
+	assert.Contains(t, problem.Detail, "invalid authorization code")
 }
 
 // --- Refresh tests ---

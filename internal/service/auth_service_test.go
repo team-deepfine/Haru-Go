@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/daewon/haru/internal/model"
 	"github.com/daewon/haru/pkg/jwt"
+	jwtlib "github.com/golang-jwt/jwt/v5"
 	"github.com/daewon/haru/pkg/oauth"
 	"github.com/google/uuid"
 )
@@ -112,8 +116,23 @@ func newTestJWTManager() *jwt.Manager {
 	return jwt.NewManager("test-secret", time.Hour, 720*time.Hour)
 }
 
-func newTestAppleVerifier() *oauth.AppleVerifier {
-	return oauth.NewAppleVerifier("test-client-id")
+// testApplePrivateKeyPEM is a test-only ES256 private key (not used in production).
+const testApplePrivateKeyPEM = `-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQggNPpkAwDVkvZw6H1
+sOZ0HU1bCMeoQ1b1+OnuG8AxbU6hRANCAAQ85HzhTQNWkkyZXtdZMV2B96l+paFE
+XM+YSpZkqDqkJoOYd5TYGa7iDC5iDFxWYeyIpt80lnMX/0KVH0ipb2Sf
+-----END PRIVATE KEY-----`
+
+func newTestAppleClient() *oauth.AppleClient {
+	client, err := oauth.NewAppleClient("test-client-id", "test-team-id", "test-key-id", testApplePrivateKeyPEM, "")
+	if err != nil {
+		panic("failed to create test apple client: " + err.Error())
+	}
+	return client
+}
+
+func newTestKakaoClient() *oauth.KakaoClient {
+	return oauth.NewKakaoClient("test-kakao-id", "", "")
 }
 
 func ptrString(s string) *string { return &s }
@@ -154,7 +173,7 @@ func TestRefreshToken_Success(t *testing.T) {
 		},
 	}
 
-	svc := NewAuthService(&mockUserRepository{}, tokenRepo, jwtMgr, newTestAppleVerifier())
+	svc := NewAuthService(&mockUserRepository{}, tokenRepo, jwtMgr, newTestAppleClient(), newTestKakaoClient())
 
 	newPair, err := svc.RefreshToken(context.Background(), originalPair.RefreshToken)
 	if err != nil {
@@ -182,7 +201,7 @@ func TestRefreshToken_InvalidToken(t *testing.T) {
 		},
 	}
 
-	svc := NewAuthService(&mockUserRepository{}, tokenRepo, newTestJWTManager(), newTestAppleVerifier())
+	svc := NewAuthService(&mockUserRepository{}, tokenRepo, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
 
 	_, err := svc.RefreshToken(context.Background(), "totally-invalid-token")
 	if err == nil {
@@ -207,7 +226,7 @@ func TestLogout_Success(t *testing.T) {
 		},
 	}
 
-	svc := NewAuthService(&mockUserRepository{}, tokenRepo, newTestJWTManager(), newTestAppleVerifier())
+	svc := NewAuthService(&mockUserRepository{}, tokenRepo, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
 
 	err := svc.Logout(context.Background(), userID)
 	if err != nil {
@@ -236,7 +255,7 @@ func TestGetCurrentUser_Success(t *testing.T) {
 		},
 	}
 
-	svc := NewAuthService(userRepo, &mockTokenRepository{}, newTestJWTManager(), newTestAppleVerifier())
+	svc := NewAuthService(userRepo, &mockTokenRepository{}, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
 
 	user, err := svc.GetCurrentUser(context.Background(), userID)
 	if err != nil {
@@ -263,7 +282,7 @@ func TestGetCurrentUser_NotFound(t *testing.T) {
 		},
 	}
 
-	svc := NewAuthService(userRepo, &mockTokenRepository{}, newTestJWTManager(), newTestAppleVerifier())
+	svc := NewAuthService(userRepo, &mockTokenRepository{}, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
 
 	_, err := svc.GetCurrentUser(context.Background(), uuid.Must(uuid.NewV7()))
 	if err == nil {
@@ -299,7 +318,7 @@ func TestDeleteAccount_Success(t *testing.T) {
 		},
 	}
 
-	svc := NewAuthService(userRepo, tokenRepo, newTestJWTManager(), newTestAppleVerifier())
+	svc := NewAuthService(userRepo, tokenRepo, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
 
 	err := svc.DeleteAccount(context.Background(), userID)
 	if err != nil {
@@ -313,19 +332,114 @@ func TestDeleteAccount_Success(t *testing.T) {
 	}
 }
 
-func TestAppleLogin_InvalidToken(t *testing.T) {
+func TestAppleLogin_InvalidCode(t *testing.T) {
+	// Mock Apple token endpoint that returns 400 (invalid grant)
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant"})
+	}))
+	defer mockServer.Close()
+
+	appleClient := newTestAppleClient()
+	appleClient.SetTokenURL(mockServer.URL)
+
 	svc := NewAuthService(
 		&mockUserRepository{},
 		&mockTokenRepository{},
 		newTestJWTManager(),
-		newTestAppleVerifier(),
+		appleClient,
+		newTestKakaoClient(),
 	)
 
-	_, _, err := svc.AppleLogin(context.Background(), "garbage-not-a-jwt")
+	_, _, err := svc.AppleLogin(context.Background(), "invalid-auth-code")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, model.ErrInvalidIDToken) {
-		t.Fatalf("expected ErrInvalidIDToken, got: %v", err)
+	if !errors.Is(err, model.ErrInvalidAuthCode) {
+		t.Fatalf("expected ErrInvalidAuthCode, got: %v", err)
 	}
+}
+
+func TestAppleLogin_Success(t *testing.T) {
+	// Create a mock id_token JWT with sub and email claims
+	idToken := createTestIDToken(t, "apple-user-123", "test@apple.com")
+
+	// Mock Apple token endpoint that returns a valid response
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{
+			"access_token": "mock-access-token",
+			"id_token":     idToken,
+			"token_type":   "Bearer",
+		})
+	}))
+	defer mockServer.Close()
+
+	appleClient := newTestAppleClient()
+	appleClient.SetTokenURL(mockServer.URL)
+
+	createCalled := false
+	userRepo := &mockUserRepository{
+		findByProviderSub: func(_ context.Context, provider, providerSub string) (*model.User, error) {
+			if provider == "apple" && providerSub == "apple-user-123" {
+				return nil, nil // new user
+			}
+			return nil, model.ErrUserNotFound
+		},
+		createFn: func(_ context.Context, user *model.User) error {
+			createCalled = true
+			if user.Provider != "apple" {
+				t.Errorf("expected provider 'apple', got '%s'", user.Provider)
+			}
+			if user.ProviderSub != "apple-user-123" {
+				t.Errorf("expected providerSub 'apple-user-123', got '%s'", user.ProviderSub)
+			}
+			if user.Email == nil || *user.Email != "test@apple.com" {
+				t.Errorf("expected email 'test@apple.com', got %v", user.Email)
+			}
+			return nil
+		},
+	}
+
+	tokenRepo := &mockTokenRepository{
+		createFn: func(_ context.Context, rt *model.RefreshToken) error {
+			return nil
+		},
+	}
+
+	svc := NewAuthService(userRepo, tokenRepo, newTestJWTManager(), appleClient, newTestKakaoClient())
+
+	user, tokenPair, err := svc.AppleLogin(context.Background(), "valid-auth-code")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if user == nil {
+		t.Fatal("expected non-nil user")
+	}
+	if tokenPair == nil {
+		t.Fatal("expected non-nil token pair")
+	}
+	if tokenPair.AccessToken == "" {
+		t.Error("expected non-empty access token")
+	}
+	if !createCalled {
+		t.Error("expected Create to be called for new user")
+	}
+}
+
+// createTestIDToken creates a minimal unsigned JWT with sub and email claims for testing.
+func createTestIDToken(t *testing.T, sub, email string) string {
+	t.Helper()
+	token := jwtlib.NewWithClaims(jwtlib.SigningMethodHS256, jwtlib.MapClaims{
+		"sub":   sub,
+		"email": email,
+		"iss":   "https://appleid.apple.com",
+		"aud":   "test-client-id",
+		"exp":   time.Now().Add(time.Hour).Unix(),
+		"iat":   time.Now().Unix(),
+	})
+	signed, err := token.SignedString([]byte("test-secret-for-id-token"))
+	if err != nil {
+		t.Fatalf("failed to create test id_token: %v", err)
+	}
+	return signed
 }

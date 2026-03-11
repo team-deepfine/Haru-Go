@@ -47,6 +47,13 @@ type testUser struct {
 	RefreshToken string
 }
 
+// testApplePrivateKeyPEM is a test-only ES256 private key (not used in production).
+const testApplePrivateKeyPEM = `-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQggNPpkAwDVkvZw6H1
+sOZ0HU1bCMeoQ1b1+OnuG8AxbU6hRANCAAQ85HzhTQNWkkyZXtdZMV2B96l+paFE
+XM+YSpZkqDqkJoOYd5TYGa7iDC5iDFxWYeyIpt80lnMX/0KVH0ipb2Sf
+-----END PRIVATE KEY-----`
+
 // noopVoiceParsingService mirrors the unexported one in cmd/server/main.go.
 type noopVoiceParsingService struct{}
 
@@ -73,8 +80,13 @@ func setupTestServer(t *testing.T) *testServer {
 	tokenRepo := repository.NewTokenRepository(db)
 	eventRepo := repository.NewEventRepository(db)
 
-	appleVerifier := oauth.NewAppleVerifier("test-client-id")
-	authSvc := service.NewAuthService(userRepo, tokenRepo, jwtManager, appleVerifier)
+	appleClient, err := oauth.NewAppleClient(
+		"test-client-id", "test-team-id", "test-key-id",
+		testApplePrivateKeyPEM, "",
+	)
+	require.NoError(t, err)
+	kakaoClient := oauth.NewKakaoClient("test-kakao-id", "", "")
+	authSvc := service.NewAuthService(userRepo, tokenRepo, jwtManager, appleClient, kakaoClient)
 	authHandler := handler.NewAuthHandler(authSvc)
 
 	eventSvc := service.NewEventService(eventRepo)
