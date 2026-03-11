@@ -1,4 +1,4 @@
-package handler
+package handler_test
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/daewon/haru/internal/dto"
+	"github.com/daewon/haru/internal/handler"
 	"github.com/daewon/haru/internal/middleware"
 	"github.com/daewon/haru/internal/model"
 	"github.com/daewon/haru/pkg/jwt"
@@ -85,7 +86,7 @@ func newTestTokenPair() *jwt.TokenPair {
 
 func setupPublicRouter(svc *mockAuthService) *gin.Engine {
 	r := gin.New()
-	h := NewAuthHandler(svc)
+	h := handler.NewAuthHandler(svc)
 	api := r.Group("/api")
 	h.RegisterPublicRoutes(api)
 	return r
@@ -93,7 +94,7 @@ func setupPublicRouter(svc *mockAuthService) *gin.Engine {
 
 func setupProtectedRouter(svc *mockAuthService) *gin.Engine {
 	r := gin.New()
-	h := NewAuthHandler(svc)
+	h := handler.NewAuthHandler(svc)
 	api := r.Group("/api")
 	h.RegisterProtectedRoutes(api)
 	return r
@@ -279,7 +280,7 @@ func TestMe_ValidUser(t *testing.T) {
 	}
 
 	router := gin.New()
-	h := NewAuthHandler(svc)
+	h := handler.NewAuthHandler(svc)
 	router.GET("/api/auth/me", func(c *gin.Context) {
 		middleware.SetUserID(c, userID)
 		c.Next()
@@ -332,7 +333,7 @@ func TestLogout_Valid(t *testing.T) {
 	}
 
 	router := gin.New()
-	h := NewAuthHandler(svc)
+	h := handler.NewAuthHandler(svc)
 	router.POST("/api/auth/logout", func(c *gin.Context) {
 		middleware.SetUserID(c, userID)
 		c.Next()
@@ -361,7 +362,7 @@ func TestDeleteAccount_Valid(t *testing.T) {
 	}
 
 	router := gin.New()
-	h := NewAuthHandler(svc)
+	h := handler.NewAuthHandler(svc)
 	router.DELETE("/api/auth/account", func(c *gin.Context) {
 		middleware.SetUserID(c, userID)
 		c.Next()
@@ -388,7 +389,7 @@ func TestDeleteAccount_WithAppleCode(t *testing.T) {
 	}
 
 	router := gin.New()
-	h := NewAuthHandler(svc)
+	h := handler.NewAuthHandler(svc)
 	router.DELETE("/api/auth/account", func(c *gin.Context) {
 		middleware.SetUserID(c, userID)
 		c.Next()
