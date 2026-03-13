@@ -327,7 +327,7 @@ POST /api/events
 | startAt | string | O | 시작 시간 (ISO-8601, e.g. `2024-03-10T09:00:00Z`) |
 | endAt | string | O | 종료 시간 (ISO-8601, e.g. `2024-03-10T10:00:00Z`) |
 | allDay | boolean | | 종일 여부 (default: `false`) |
-| timezone | string | | IANA 타임존 (default: `"UTC"`, e.g. `"Asia/Seoul"`) |
+| timezone | string | | IANA 타임존 (default: `"Asia/Seoul"`) |
 | locationName | string \| null | | 장소명 |
 | locationAddress | string \| null | | 주소 |
 | locationLat | number \| null | | 위도 |

@@ -11,7 +11,7 @@ import (
 
 func applyDefaults(req *CreateEventInput) {
 	if req.Timezone == "" {
-		req.Timezone = "UTC"
+		req.Timezone = "Asia/Seoul"
 	}
 	if req.ReminderOffsets == nil {
 		req.ReminderOffsets = []int64{180}
