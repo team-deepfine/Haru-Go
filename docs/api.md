@@ -14,7 +14,7 @@ Authorization: Bearer {accessToken}
 
 | 분류 | 엔드포인트 | 인증 필요 |
 |------|-----------|----------|
-| Public | `POST /api/auth/apple`, `POST /api/auth/refresh` | X |
+| Public | `POST /api/auth/apple`, `POST /api/auth/kakao`, `POST /api/auth/refresh` | X |
 | Protected | 그 외 모든 `/api/*` 엔드포인트 (Events, Voice, Devices) | O |
 | Health | `GET /health` | X |
 
@@ -181,7 +181,105 @@ curl -X POST http://localhost:8080/api/auth/apple \
 
 ---
 
-### 2. 토큰 갱신
+### 2. 카카오 로그인
+
+카카오 SDK에서 받은 authorization code를 서버에 전달하면, 서버가 카카오 토큰 API에서 code를 교환하여 사용자를 조회/생성하고 JWT 토큰 쌍을 발급합니다.
+
+#### 카카오 로그인 Flow
+
+```
+┌───────────┐    ┌──────────────┐    ┌────────────────┐    ┌──────┐
+│   Client   │    │ Kakao Server │    │   Haru API     │    │  DB  │
+└─────┬─────┘    └──────┬───────┘    └───────┬────────┘    └──┬───┘
+      │                 │                     │                │
+      │  1. 카카오 로그인 버튼 탭              │                │
+      │─── Kakao SDK ──>│                     │                │
+      │                 │                     │                │
+      │  2. 사용자 카카오 인증                 │                │
+      │                 │                     │                │
+      │  3. authorization code 획득           │                │
+      │<── code ────────│                     │                │
+      │                 │                     │                │
+      │  4. POST /api/auth/kakao              │                │
+      │     { "code": "<authorization_code>" }│                │
+      │──────────────────────────────────────>│                │
+      │                 │                     │                │
+      │                 │  5. code → access_token 교환         │
+      │                 │<────────────────────│                │
+      │                 │    access_token 응답 │                │
+      │                 │────────────────────>│                │
+      │                 │                     │                │
+      │                 │  6. access_token으로 │                │
+      │                 │     사용자 정보 조회  │                │
+      │                 │<────────────────────│                │
+      │                 │────────────────────>│                │
+      │                 │                     │                │
+      │                 │                     │  7. 유저       │
+      │                 │                     │     조회/생성  │
+      │                 │                     │───────────────>│
+      │                 │                     │<───────────────│
+      │                 │                     │                │
+      │  8. 응답: accessToken, refreshToken, user              │
+      │<──────────────────────────────────────│                │
+      │                 │                     │                │
+```
+
+#### API Endpoint
+
+```
+POST /api/auth/kakao
+```
+
+**Request Body**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| code | string | O | 카카오 SDK에서 받은 authorization code |
+
+**Example**
+
+```bash
+curl -X POST http://localhost:8080/api/auth/kakao \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "a1b2c3d4e5f6..."
+  }'
+```
+
+**Response** `200 OK`
+
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+  "expiresIn": 3600,
+  "user": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "provider": "kakao",
+    "nickname": "홍길동",
+    "profileImage": "https://k.kakaocdn.net/...",
+    "email": "hong@example.com",
+    "createdAt": "2024-03-06T12:00:00Z",
+    "lastLoginAt": "2024-03-06T12:00:00Z"
+  }
+}
+```
+
+**Error**
+
+| Status | 조건 |
+|--------|------|
+| 400 | `code` 누락 |
+| 401 | 카카오 인증 코드가 유효하지 않음 (만료, 이미 사용됨) |
+| 502 | 카카오 API 호출 실패 |
+
+> **Note:**
+> - 카카오 authorization code는 **1회용**이며 발급 후 짧은 시간 내에 사용해야 합니다.
+> - 카카오는 동의 항목 설정에 따라 email, nickname, profileImage가 제공되지 않을 수 있습니다.
+
+---
+
+### 3. 토큰 갱신
 
 Refresh Token Rotation 방식으로 새 토큰 쌍을 발급합니다. 기존 refresh token은 즉시 폐기됩니다.
 
@@ -224,7 +322,7 @@ curl -X POST http://localhost:8080/api/auth/refresh \
 
 ---
 
-### 3. 현재 사용자 정보 조회
+### 4. 현재 사용자 정보 조회
 
 ```
 GET /api/auth/me
@@ -260,7 +358,7 @@ curl http://localhost:8080/api/auth/me \
 
 ---
 
-### 4. 로그아웃
+### 5. 로그아웃
 
 해당 사용자의 모든 refresh token을 삭제합니다.
 
@@ -283,7 +381,7 @@ curl -X POST http://localhost:8080/api/auth/logout \
 
 ---
 
-### 5. 회원 탈퇴
+### 6. 회원 탈퇴
 
 사용자의 모든 refresh token과 사용자 계정을 삭제합니다.
 Apple 사용자의 경우, Apple의 token revoke API를 호출하여 연결을 해제합니다.
@@ -338,7 +436,7 @@ curl -X DELETE http://localhost:8080/api/auth/account \
 > 모든 Event API는 인증이 필요합니다. `Authorization: Bearer {accessToken}` 헤더를 포함하세요.
 > 각 사용자는 자신의 일정만 조회/수정/삭제할 수 있습니다.
 
-### 6. 일정 생성
+### 7. 일정 생성
 
 ```
 POST /api/events
@@ -399,7 +497,7 @@ curl -X POST http://localhost:8080/api/events \
 
 ---
 
-### 7. 일정 단건 조회
+### 8. 일정 단건 조회
 
 ```
 GET /api/events/:id
@@ -439,7 +537,7 @@ curl http://localhost:8080/api/events/550e8400-e29b-41d4-a716-446655440000 \
 
 ---
 
-### 8. 일정 목록 조회 (날짜 범위)
+### 9. 일정 목록 조회 (날짜 범위)
 
 ```
 GET /api/events?start={start}&end={end}
@@ -484,7 +582,7 @@ curl "http://localhost:8080/api/events?start=2024-03-01T00:00:00Z&end=2024-03-31
 
 ---
 
-### 9. 일정 수정
+### 10. 일정 수정
 
 ```
 PUT /api/events/:id
@@ -534,7 +632,7 @@ curl -X PUT http://localhost:8080/api/events/550e8400-e29b-41d4-a716-44665544000
 
 ---
 
-### 10. 일정 삭제
+### 11. 일정 삭제
 
 ```
 DELETE /api/events/:id
@@ -565,7 +663,7 @@ curl -X DELETE http://localhost:8080/api/events/550e8400-e29b-41d4-a716-44665544
 
 > 인증이 필요합니다. `Authorization: Bearer {accessToken}` 헤더를 포함하세요.
 
-### 11. 음성 텍스트 → 일정 파싱
+### 12. 음성 텍스트 → 일정 파싱
 
 한국어 음성 텍스트를 AI(Gemini)로 분석하여 구조화된 일정 데이터를 추출합니다.
 응답의 `event` 필드는 `POST /api/events`의 요청 본문과 동일한 구조이므로, 그대로 일정 생성에 사용할 수 있습니다.
@@ -642,7 +740,7 @@ curl -X POST http://localhost:8080/api/events/parse-voice \
 > 모든 Device Token API는 인증이 필요합니다. `Authorization: Bearer {accessToken}` 헤더를 포함하세요.
 > 푸시 알림을 받기 위해 FCM 디바이스 토큰을 등록/해제합니다.
 
-### 12. 디바이스 토큰 등록
+### 13. 디바이스 토큰 등록
 
 FCM 디바이스 토큰을 등록합니다. 동일 토큰이 이미 등록되어 있으면 기존 레코드를 반환합니다.
 
@@ -688,7 +786,7 @@ curl -X POST http://localhost:8080/api/devices \
 
 ---
 
-### 13. 디바이스 토큰 해제
+### 14. 디바이스 토큰 해제
 
 등록된 FCM 디바이스 토큰을 삭제합니다.
 
@@ -789,7 +887,7 @@ curl -X DELETE http://localhost:8080/api/devices \
 | Field | Type | Nullable | Description |
 |-------|------|----------|-------------|
 | id | string (UUID) | No | 사용자 고유 식별자 |
-| provider | string | No | OAuth 제공자 (`"apple"`) |
+| provider | string | No | OAuth 제공자 (`"apple"`, `"kakao"`) |
 | email | string | Yes | 이메일 (없으면 응답에서 생략) |
 | nickname | string | Yes | 닉네임 (없으면 응답에서 생략) |
 | profileImage | string | Yes | 프로필 이미지 URL (없으면 응답에서 생략) |
@@ -849,11 +947,14 @@ curl -X DELETE http://localhost:8080/api/devices \
 | `APPLE_KEY_ID` | X | - | Apple Sign In Key ID |
 | `APPLE_PRIVATE_KEY` | X | - | Apple private key (.p8 파일의 PEM 문자열) |
 | `APPLE_REDIRECT_URI` | X | - | Apple Return URL (Apple Developer Console과 정확히 일치해야 함) |
+| `KAKAO_CLIENT_ID` | X | - | 카카오 REST API 키 |
+| `KAKAO_CLIENT_SECRET` | X | - | 카카오 Client Secret (보안 강화 시) |
+| `KAKAO_REDIRECT_URI` | X | - | 카카오 Redirect URI |
 | `GEMINI_API_KEY` | X | - | Gemini API 키 (미설정 시 음성 파싱 502 반환) |
 | `GEMINI_MODEL` | X | `gemini-2.5-flash` | Gemini 모델명 |
 | `DEFAULT_TIMEZONE` | X | `Asia/Seoul` | 음성 파싱 기본 타임존 |
 | `FCM_ENABLED` | X | `false` | FCM 푸시 알림 워커 활성화 (`true`로 설정 시 활성화) |
-| `FCM_CREDENTIALS_JSON` | X | - | Firebase 서비스 계정 JSON (`FCM_ENABLED=true` 시 필수) |
+| `FCM_CREDENTIALS_FILE` | X | - | Firebase 서비스 계정 JSON 파일 경로 (`FCM_ENABLED=true` 시 필수) |
 
 ---
 
