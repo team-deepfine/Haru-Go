@@ -13,7 +13,7 @@ type AppleLoginRequest struct {
 
 // KakaoLoginRequest is the request body for Kakao login.
 type KakaoLoginRequest struct {
-	Code string `json:"code" binding:"required"`
+	AccessToken string `json:"accessToken" binding:"required"`
 }
 
 // DeleteAccountRequest is the request body for account deletion.

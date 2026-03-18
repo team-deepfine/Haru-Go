@@ -5,14 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
-	"strings"
 )
 
 const (
-	kakaoTokenURL   = "https://kauth.kakao.com/oauth/token"
-	kakaoUserMeURL  = "https://kapi.kakao.com/v2/user/me"
+	kakaoUserMeURL = "https://kapi.kakao.com/v2/user/me"
 )
 
 // KakaoUserInfo holds the user info retrieved from Kakao APIs.
@@ -23,73 +20,22 @@ type KakaoUserInfo struct {
 	ProfileImage *string
 }
 
-// KakaoClient exchanges Kakao authorization codes for user information.
+// KakaoClient fetches user information from Kakao APIs using an access token.
 type KakaoClient struct {
-	clientID     string
-	clientSecret string
-	redirectURI  string
-	httpClient   *http.Client
+	httpClient *http.Client
 }
 
 // NewKakaoClient creates a new Kakao OAuth client.
-func NewKakaoClient(clientID, clientSecret, redirectURI string) *KakaoClient {
+func NewKakaoClient() *KakaoClient {
 	return &KakaoClient{
-		clientID:     clientID,
-		clientSecret: clientSecret,
-		redirectURI:  redirectURI,
-		httpClient:   &http.Client{Timeout: 10 * 1e9}, // 10 seconds
+		httpClient: &http.Client{Timeout: 10 * 1e9}, // 10 seconds
 	}
 }
 
-// ExchangeAndGetUser exchanges an authorization code for a Kakao access token,
-// then fetches user info from the Kakao API.
-func (k *KakaoClient) ExchangeAndGetUser(ctx context.Context, code string) (*KakaoUserInfo, error) {
-	accessToken, err := k.exchangeCode(ctx, code)
-	if err != nil {
-		return nil, err
-	}
-
+// GetUserByAccessToken fetches user info from the Kakao API using an access token
+// obtained directly from the Kakao SDK (mobile flow).
+func (k *KakaoClient) GetUserByAccessToken(ctx context.Context, accessToken string) (*KakaoUserInfo, error) {
 	return k.getUserInfo(ctx, accessToken)
-}
-
-// exchangeCode exchanges an authorization code for a Kakao access token.
-func (k *KakaoClient) exchangeCode(ctx context.Context, code string) (string, error) {
-	data := url.Values{
-		"grant_type":   {"authorization_code"},
-		"client_id":    {k.clientID},
-		"redirect_uri": {k.redirectURI},
-		"code":         {code},
-	}
-	if k.clientSecret != "" {
-		data.Set("client_secret", k.clientSecret)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, kakaoTokenURL, strings.NewReader(data.Encode()))
-	if err != nil {
-		return "", fmt.Errorf("create token request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := k.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("kakao token request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("kakao token endpoint returned status %d", resp.StatusCode)
-	}
-
-	var tokenResp kakaoTokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return "", fmt.Errorf("decode token response: %w", err)
-	}
-
-	if tokenResp.AccessToken == "" {
-		return "", fmt.Errorf("empty access token in kakao response")
-	}
-
-	return tokenResp.AccessToken, nil
 }
 
 // getUserInfo fetches user profile from the Kakao user info API.
@@ -137,11 +83,6 @@ func (k *KakaoClient) getUserInfo(ctx context.Context, accessToken string) (*Kak
 }
 
 // Kakao API response types (unexported).
-
-type kakaoTokenResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-}
 
 type kakaoUserResponse struct {
 	ID           int64         `json:"id"`

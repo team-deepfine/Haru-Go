@@ -19,9 +19,8 @@ type Config struct {
 	LogLevel string
 	Gemini   GeminiConfig
 	JWT      JWTConfig
-	Apple    AppleConfig
-	Kakao    KakaoConfig
-	FCM      FCMConfig
+	Apple AppleConfig
+	FCM   FCMConfig
 }
 
 // DBConfig holds database connection settings.
@@ -54,13 +53,6 @@ type AppleConfig struct {
 	RedirectURI string
 }
 
-// KakaoConfig holds Kakao OAuth settings.
-type KakaoConfig struct {
-	ClientID     string
-	ClientSecret string
-	RedirectURI  string
-}
-
 // Load reads configuration from environment variables (with .env fallback).
 func Load() *Config {
 	_ = godotenv.Load()
@@ -89,11 +81,6 @@ func Load() *Config {
 			KeyID:       getEnv("APPLE_KEY_ID", ""),
 			PrivateKey:  getEnv("APPLE_PRIVATE_KEY", ""),
 			RedirectURI: getEnv("APPLE_REDIRECT_URI", ""),
-		},
-		Kakao: KakaoConfig{
-			ClientID:     getEnv("KAKAO_CLIENT_ID", ""),
-			ClientSecret: getEnv("KAKAO_CLIENT_SECRET", ""),
-			RedirectURI:  getEnv("KAKAO_REDIRECT_URI", ""),
 		},
 		FCM: FCMConfig{
 			CredentialsFile: getEnv("FCM_CREDENTIALS_FILE", ""),

@@ -76,7 +76,7 @@ func main() {
 		slog.Error("failed to create apple client", "error", err)
 		os.Exit(1)
 	}
-	kakaoClient := oauth.NewKakaoClient(cfg.Kakao.ClientID, cfg.Kakao.ClientSecret, cfg.Kakao.RedirectURI)
+	kakaoClient := oauth.NewKakaoClient()
 
 	// Wire notification dependencies
 	notifRepo := repository.NewNotificationRepository(db)

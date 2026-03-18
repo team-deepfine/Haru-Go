@@ -87,7 +87,7 @@ func setupTestServer(t *testing.T) *testServer {
 		testApplePrivateKeyPEM, "",
 	)
 	require.NoError(t, err)
-	kakaoClient := oauth.NewKakaoClient("test-kakao-id", "", "")
+	kakaoClient := oauth.NewKakaoClient()
 	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
 	authSvc := service.NewAuthService(userRepo, tokenRepo, deviceTokenRepo, jwtManager, appleClient, kakaoClient)
 	authHandler := handler.NewAuthHandler(authSvc)

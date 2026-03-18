@@ -104,8 +104,8 @@ func (s *authService) AppleLogin(ctx context.Context, code string) (*model.User,
 	return user, tokenPair, nil
 }
 
-func (s *authService) KakaoLogin(ctx context.Context, code string) (*model.User, *jwt.TokenPair, error) {
-	info, err := s.kakaoClient.ExchangeAndGetUser(ctx, code)
+func (s *authService) KakaoLogin(ctx context.Context, accessToken string) (*model.User, *jwt.TokenPair, error) {
+	info, err := s.kakaoClient.GetUserByAccessToken(ctx, accessToken)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %v", model.ErrInvalidAuthCode, err)
 	}

@@ -63,11 +63,11 @@ func (h *AuthHandler) AppleLogin(c *gin.Context) {
 func (h *AuthHandler) KakaoLogin(c *gin.Context) {
 	var req dto.KakaoLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "code is required")
+		response.Error(c, http.StatusBadRequest, "accessToken is required")
 		return
 	}
 
-	user, tokenPair, err := h.svc.KakaoLogin(c.Request.Context(), req.Code)
+	user, tokenPair, err := h.svc.KakaoLogin(c.Request.Context(), req.AccessToken)
 	if err != nil {
 		handleAuthError(c, err)
 		return

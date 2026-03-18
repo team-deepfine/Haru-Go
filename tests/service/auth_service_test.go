@@ -164,7 +164,7 @@ func newTestAppleClient() *oauth.AppleClient {
 }
 
 func newTestKakaoClient() *oauth.KakaoClient {
-	return oauth.NewKakaoClient("test-kakao-id", "", "")
+	return oauth.NewKakaoClient()
 }
 
 func ptrString(s string) *string { return &s }
