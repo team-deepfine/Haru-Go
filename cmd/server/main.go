@@ -122,7 +122,7 @@ func main() {
 	// Start notification worker if FCM is enabled
 	var workerCancel context.CancelFunc
 	if cfg.FCM.Enabled {
-		fcmClient, err := fcm.NewClient(context.Background(), []byte(cfg.FCM.CredentialsJSON))
+		fcmClient, err := fcm.NewClient(context.Background(), cfg.FCM.CredentialsFile)
 		if err != nil {
 			slog.Error("failed to create FCM client", "error", err)
 			os.Exit(1)
