@@ -78,15 +78,15 @@ func main() {
 	}
 	kakaoClient := oauth.NewKakaoClient(cfg.Kakao.ClientID, cfg.Kakao.ClientSecret, cfg.Kakao.RedirectURI)
 
-	// Wire auth dependencies
-	userRepo := repository.NewUserRepository(db)
-	tokenRepo := repository.NewTokenRepository(db)
-	authSvc := service.NewAuthService(userRepo, tokenRepo, jwtManager, appleClient, kakaoClient)
-	authHandler := handler.NewAuthHandler(authSvc)
-
 	// Wire notification dependencies
 	notifRepo := repository.NewNotificationRepository(db)
 	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
+
+	// Wire auth dependencies
+	userRepo := repository.NewUserRepository(db)
+	tokenRepo := repository.NewTokenRepository(db)
+	authSvc := service.NewAuthService(userRepo, tokenRepo, deviceTokenRepo, jwtManager, appleClient, kakaoClient)
+	authHandler := handler.NewAuthHandler(authSvc)
 	notifScheduler := service.NewNotificationScheduler(notifRepo)
 
 	// Wire event dependencies (with notification scheduler)
