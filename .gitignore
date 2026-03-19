@@ -7,8 +7,8 @@
 .env
 .env.local
 
-# Firebase credentials
-*firebase*.json
+# Secrets (credentials, keys)
+secrets/
 
 # Prompts
 prompts/

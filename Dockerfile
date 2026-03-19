@@ -16,7 +16,7 @@ RUN apk add --no-cache tzdata ca-certificates
 RUN adduser -D -u 1000 appuser
 COPY --from=builder /haru /haru
 COPY --from=builder /app/prompts /prompts
-COPY --from=builder /app/firebase-credentials.json /app/firebase-credentials.json
+COPY --from=builder /app/secrets /app/secrets
 
 USER appuser
 EXPOSE 8080
