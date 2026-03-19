@@ -22,4 +22,9 @@ var (
 	// Notification errors
 	ErrDeviceTokenRequired = errors.New("device token is required")
 	ErrDeviceTokenNotFound = errors.New("device token not found")
+
+	// Subscription errors
+	ErrVoiceParseLimit     = errors.New("free voice parsing limit exceeded")
+	ErrInvalidTransaction  = errors.New("invalid transaction")
+	ErrStoreAPIFailed      = errors.New("app store api call failed")
 )

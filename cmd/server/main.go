@@ -21,6 +21,7 @@ import (
 	"github.com/daewon/haru/pkg/fcm"
 	"github.com/daewon/haru/pkg/gemini"
 	jwtpkg "github.com/daewon/haru/pkg/jwt"
+	"github.com/daewon/haru/pkg/appstore"
 	"github.com/daewon/haru/pkg/oauth"
 )
 
@@ -98,6 +99,29 @@ func main() {
 	deviceTokenSvc := service.NewDeviceTokenService(deviceTokenRepo)
 	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenSvc)
 
+	// Wire Apple IAP client (optional: subscription verify won't work without it)
+	var appStoreClient *appstore.Client
+	if cfg.AppleIAP.PrivateKeyPath != "" {
+		appStoreClient, err = appstore.NewClient(
+			cfg.AppleIAP.PrivateKeyPath,
+			cfg.AppleIAP.KeyID,
+			cfg.AppleIAP.IssuerID,
+			cfg.AppleIAP.BundleID,
+			cfg.AppleIAP.Environment,
+		)
+		if err != nil {
+			slog.Error("failed to create app store client", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("apple IAP verification enabled")
+	} else {
+		slog.Warn("APPLE_IAP_PRIVATE_KEY_PATH not set, subscription verify will return 502")
+	}
+
+	// Wire subscription dependencies
+	subscriptionSvc := service.NewSubscriptionService(userRepo, appStoreClient, cfg.Subscription.VoiceParseLimit)
+	subscriptionHandler := handler.NewSubscriptionHandler(subscriptionSvc)
+
 	// Wire voice parsing dependencies
 	var voiceSvc service.VoiceParsingService
 	if cfg.Gemini.APIKey != "" {
@@ -115,9 +139,9 @@ func main() {
 		slog.Warn("GEMINI_API_KEY not set, voice parsing endpoint will return 502")
 		voiceSvc = &noopVoiceParsingService{}
 	}
-	voiceHandler := handler.NewVoiceHandler(voiceSvc)
+	voiceHandler := handler.NewVoiceHandler(voiceSvc, subscriptionSvc)
 
-	r := router.New(jwtManager, authHandler, eventHandler, voiceHandler, deviceTokenHandler)
+	r := router.New(jwtManager, authHandler, eventHandler, voiceHandler, deviceTokenHandler, subscriptionHandler)
 
 	// Start notification worker if FCM is enabled
 	var workerCancel context.CancelFunc

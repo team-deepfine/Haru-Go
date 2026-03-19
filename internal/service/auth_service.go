@@ -17,7 +17,7 @@ type AuthService interface {
 	AppleLogin(ctx context.Context, code string) (*model.User, *jwt.TokenPair, error)
 	KakaoLogin(ctx context.Context, code string) (*model.User, *jwt.TokenPair, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*jwt.TokenPair, error)
-	Logout(ctx context.Context, userID uuid.UUID) error
+	Logout(ctx context.Context, userID uuid.UUID, deviceToken string) error
 	GetCurrentUser(ctx context.Context, userID uuid.UUID) (*model.User, error)
 	DeleteAccount(ctx context.Context, userID uuid.UUID, authCode string) error
 }
@@ -201,9 +201,11 @@ func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (*j
 	return tokenPair, nil
 }
 
-func (s *authService) Logout(ctx context.Context, userID uuid.UUID) error {
-	if err := s.deviceTokenRepo.DeleteByUserID(ctx, userID); err != nil {
-		return fmt.Errorf("delete device tokens: %w", err)
+func (s *authService) Logout(ctx context.Context, userID uuid.UUID, deviceToken string) error {
+	if deviceToken != "" {
+		if err := s.deviceTokenRepo.DeleteByUserAndToken(ctx, userID, deviceToken); err != nil {
+			return fmt.Errorf("delete device token: %w", err)
+		}
 	}
 	return s.tokenRepo.DeleteByUserID(ctx, userID)
 }
