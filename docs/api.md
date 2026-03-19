@@ -15,7 +15,7 @@ Authorization: Bearer {accessToken}
 | 분류 | 엔드포인트 | 인증 필요 |
 |------|-----------|----------|
 | Public | `POST /api/auth/apple`, `POST /api/auth/kakao`, `POST /api/auth/refresh` | X |
-| Protected | 그 외 모든 `/api/*` 엔드포인트 (Events, Voice, Devices) | O |
+| Protected | 그 외 모든 `/api/*` 엔드포인트 (Events, Voice, Devices, Subscription) | O |
 | Health | `GET /health` | X |
 
 ---
@@ -820,6 +820,118 @@ curl -X DELETE http://localhost:8080/api/devices \
 
 ---
 
+## Subscription API
+
+> 모든 Subscription API는 인증이 필요합니다. `Authorization: Bearer {accessToken}` 헤더를 포함하세요.
+
+### 15. 구독 상태 조회
+
+```
+GET /api/subscription
+```
+
+**Headers:** `Authorization: Bearer {accessToken}`
+
+**Example**
+
+```bash
+curl http://localhost:8080/api/subscription \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```
+
+**Response** `200 OK`
+
+```json
+{
+  "subscriptionStatus": "free",
+  "voiceParseCount": 2,
+  "voiceParseLimit": 3,
+  "voiceParseRemaining": 1
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| subscriptionStatus | string | `"free"` 또는 `"premium"` |
+| expiresAt | string \| null | 구독 만료 시각 (ISO-8601, premium인 경우에만) |
+| voiceParseCount | number | 오늘 사용한 음성 파싱 횟수 |
+| voiceParseLimit | number | 비구독자 일일 최대 음성 파싱 횟수 |
+| voiceParseRemaining | number | 남은 음성 파싱 횟수 |
+
+---
+
+### 16. 구독 검증 및 활성화
+
+Apple 인앱 결제(StoreKit 2)의 Transaction ID를 서버에 전달하면, 서버가 App Store Server API v2로 거래를 검증하고 구독 상태를 활성화합니다.
+
+```
+POST /api/subscription/verify
+```
+
+**Headers:** `Authorization: Bearer {accessToken}`
+
+**Request Body**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| transactionId | string | O | StoreKit 2에서 받은 Transaction ID |
+
+**Example**
+
+```bash
+curl -X POST http://localhost:8080/api/subscription/verify \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transactionId": "2000000123456789"
+  }'
+```
+
+**Response** `200 OK`
+
+```json
+{
+  "subscriptionStatus": "premium",
+  "expiresAt": "2026-04-18T16:00:00Z",
+  "voiceParseCount": 0,
+  "voiceParseLimit": 3,
+  "voiceParseRemaining": 3
+}
+```
+
+**Error**
+
+| Status | 조건 |
+|--------|------|
+| 400 | `transactionId` 누락 |
+| 401 | 인증 토큰 누락 또는 만료 |
+| 402 | Transaction 검증 실패 (환불됨, 유효하지 않은 거래) |
+| 502 | App Store Server API 호출 실패 |
+
+---
+
+### 음성 파싱 사용 제한
+
+구독 상태에 따라 `POST /api/events/parse-voice` 호출이 제한됩니다.
+
+| 구독 상태 | 제한 |
+|-----------|------|
+| premium | 무제한 |
+| free | 하루 3회 (KST 자정 기준 리셋) |
+
+**제한 초과 시 Response** `403 Forbidden`
+
+```json
+{
+  "type": "about:blank",
+  "title": "Forbidden",
+  "status": 403,
+  "detail": "free voice parsing limit exceeded"
+}
+```
+
+---
+
 ## Error Response
 
 모든 에러는 [RFC 7807 Problem Details](https://tools.ietf.org/html/rfc7807) 형식을 따릅니다.
@@ -854,10 +966,12 @@ curl -X DELETE http://localhost:8080/api/devices \
 |--------|------|-----------|
 | 400 | Bad Request | JSON 파싱 실패, 유효성 검증 실패, 잘못된 UUID 형식 |
 | 401 | Unauthorized | 인증 토큰 누락, 만료, 검증 실패 |
+| 402 | Payment Required | Apple transaction 검증 실패 (환불됨, 유효하지 않은 거래) |
+| 403 | Forbidden | 비구독자 음성 파싱 무료 사용 횟수 초과 |
 | 404 | Not Found | 존재하지 않는 일정 ID 또는 사용자 |
 | 422 | Unprocessable Entity | 음성 텍스트에서 일정 정보 추출 실패 |
 | 500 | Internal Server Error | 서버 내부 오류 |
-| 502 | Bad Gateway | AI 서비스(Gemini) 또는 Apple 인증 서버 호출 실패 |
+| 502 | Bad Gateway | AI 서비스(Gemini), Apple 인증 서버, App Store Server API 호출 실패 |
 
 ### Validation Rules
 
@@ -945,6 +1059,12 @@ curl -X DELETE http://localhost:8080/api/devices \
 | `DEFAULT_TIMEZONE` | X | `Asia/Seoul` | 음성 파싱 기본 타임존 |
 | `FCM_ENABLED` | X | `false` | FCM 푸시 알림 워커 활성화 (`true`로 설정 시 활성화) |
 | `FCM_CREDENTIALS_FILE` | X | - | Firebase 서비스 계정 JSON 파일 경로 (`FCM_ENABLED=true` 시 필수) |
+| `APPLE_IAP_ISSUER_ID` | X | - | App Store Connect Issuer ID (구독 검증 시 필수) |
+| `APPLE_IAP_KEY_ID` | X | - | App Store Connect In-App Purchase Key ID |
+| `APPLE_IAP_PRIVATE_KEY_PATH` | X | - | In-App Purchase `.p8` 키 파일 경로 |
+| `APPLE_IAP_BUNDLE_ID` | X | - | 앱 Bundle ID (e.g., `com.deepfine.haru`) |
+| `APPLE_IAP_ENVIRONMENT` | X | `sandbox` | `sandbox` 또는 `production` |
+| `VOICE_PARSE_FREE_LIMIT` | X | `3` | 비구독자 일일 음성 파싱 무료 횟수 |
 
 ---
 
