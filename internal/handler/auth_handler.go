@@ -127,7 +127,10 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.Logout(c.Request.Context(), userID); err != nil {
+	var req dto.LogoutRequest
+	_ = c.ShouldBindJSON(&req)
+
+	if err := h.svc.Logout(c.Request.Context(), userID, req.DeviceToken); err != nil {
 		slog.Error("logout failed", "error", err)
 		response.Error(c, http.StatusInternalServerError, "internal server error")
 		return

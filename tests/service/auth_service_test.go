@@ -116,15 +116,25 @@ func (m *mockTokenRepository) DeleteExpired(ctx context.Context) error {
 
 // mockDeviceTokenRepository implements repository.DeviceTokenRepository for testing.
 type mockDeviceTokenRepository struct {
-	deleteByUserIDFn func(ctx context.Context, userID uuid.UUID) error
+	upsertFn             func(ctx context.Context, token *model.DeviceToken) error
+	deleteByUserAndTokenFn func(ctx context.Context, userID uuid.UUID, token string) error
+	deleteByUserIDFn     func(ctx context.Context, userID uuid.UUID) error
+	findByUserIDFn       func(ctx context.Context, userID uuid.UUID) ([]model.DeviceToken, error)
+	deleteByTokenFn      func(ctx context.Context, token string) error
 }
 
 var _ repository.DeviceTokenRepository = (*mockDeviceTokenRepository)(nil)
 
-func (m *mockDeviceTokenRepository) Upsert(_ context.Context, _ *model.DeviceToken) error {
+func (m *mockDeviceTokenRepository) Upsert(ctx context.Context, token *model.DeviceToken) error {
+	if m.upsertFn != nil {
+		return m.upsertFn(ctx, token)
+	}
 	return nil
 }
-func (m *mockDeviceTokenRepository) DeleteByUserAndToken(_ context.Context, _ uuid.UUID, _ string) error {
+func (m *mockDeviceTokenRepository) DeleteByUserAndToken(ctx context.Context, userID uuid.UUID, token string) error {
+	if m.deleteByUserAndTokenFn != nil {
+		return m.deleteByUserAndTokenFn(ctx, userID, token)
+	}
 	return nil
 }
 func (m *mockDeviceTokenRepository) DeleteByUserID(ctx context.Context, userID uuid.UUID) error {
@@ -133,10 +143,19 @@ func (m *mockDeviceTokenRepository) DeleteByUserID(ctx context.Context, userID u
 	}
 	return nil
 }
-func (m *mockDeviceTokenRepository) FindByUserID(_ context.Context, _ uuid.UUID) ([]model.DeviceToken, error) {
+func (m *mockDeviceTokenRepository) FindByUserID(ctx context.Context, userID uuid.UUID) ([]model.DeviceToken, error) {
+	if m.findByUserIDFn != nil {
+		return m.findByUserIDFn(ctx, userID)
+	}
 	return nil, nil
 }
-func (m *mockDeviceTokenRepository) DeleteByToken(_ context.Context, _ string) error {
+func (m *mockDeviceTokenRepository) FindByUserIDs(_ context.Context, _ []uuid.UUID) ([]model.DeviceToken, error) {
+	return nil, nil
+}
+func (m *mockDeviceTokenRepository) DeleteByToken(ctx context.Context, token string) error {
+	if m.deleteByTokenFn != nil {
+		return m.deleteByTokenFn(ctx, token)
+	}
 	return nil
 }
 
@@ -160,6 +179,7 @@ func newTestAppleClient() *oauth.AppleClient {
 	if err != nil {
 		panic("failed to create test apple client: " + err.Error())
 	}
+	client.SetSkipJWKS(true)
 	return client
 }
 
@@ -260,7 +280,7 @@ func TestLogout_Success(t *testing.T) {
 
 	svc := service.NewAuthService(&mockUserRepository{}, tokenRepo, &mockDeviceTokenRepository{}, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
 
-	err := svc.Logout(context.Background(), userID)
+	err := svc.Logout(context.Background(), userID, "")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}

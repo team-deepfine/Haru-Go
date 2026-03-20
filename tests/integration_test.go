@@ -87,6 +87,7 @@ func setupTestServer(t *testing.T) *testServer {
 		testApplePrivateKeyPEM, "",
 	)
 	require.NoError(t, err)
+	appleClient.SetSkipJWKS(true)
 	kakaoClient := oauth.NewKakaoClient()
 	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
 	authSvc := service.NewAuthService(userRepo, tokenRepo, deviceTokenRepo, jwtManager, appleClient, kakaoClient)
@@ -97,12 +98,14 @@ func setupTestServer(t *testing.T) *testServer {
 	eventSvc := service.NewEventService(eventRepo, service.WithNotificationScheduler(notifScheduler))
 	eventHandler := handler.NewEventHandler(eventSvc)
 
-	voiceHandler := handler.NewVoiceHandler(&noopVoiceParsingService{})
+	subscriptionSvc := service.NewSubscriptionService(userRepo, nil, 3)
+	subscriptionHandler := handler.NewSubscriptionHandler(subscriptionSvc)
+	voiceHandler := handler.NewVoiceHandler(&noopVoiceParsingService{}, subscriptionSvc)
 
 	deviceTokenSvc := service.NewDeviceTokenService(deviceTokenRepo)
 	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenSvc)
 
-	engine := router.New(jwtManager, authHandler, eventHandler, voiceHandler, deviceTokenHandler)
+	engine := router.New(jwtManager, authHandler, eventHandler, voiceHandler, deviceTokenHandler, subscriptionHandler)
 
 	return &testServer{
 		engine:          engine,
@@ -840,5 +843,126 @@ func TestIntegration_NotificationScheduling(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, len(notifs))
 		assert.Equal(t, 180, notifs[0].OffsetMin, "default offset should be 180 minutes")
+	})
+}
+
+// ---------------------------------------------------------------------------
+// 11. Subscription API
+// ---------------------------------------------------------------------------
+
+func TestIntegration_SubscriptionStatus(t *testing.T) {
+	ts := setupTestServer(t)
+	user := createTestUser(t, ts)
+
+	t.Run("GET /api/subscription returns free status for new user", func(t *testing.T) {
+		w := doRequest(ts, http.MethodGet, "/api/subscription", nil, user.AccessToken)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		resp := parseJSON[dto.SubscriptionResponse](t, w)
+		assert.Equal(t, "free", resp.SubscriptionStatus)
+		assert.Nil(t, resp.ExpiresAt)
+		assert.Equal(t, 3, resp.VoiceParseLimit)
+		assert.Equal(t, 0, resp.VoiceParseCount)
+		assert.Equal(t, 3, resp.VoiceParseRemaining)
+	})
+
+	t.Run("GET /api/subscription rejects unauthenticated request", func(t *testing.T) {
+		w := doRequest(ts, http.MethodGet, "/api/subscription", nil, "")
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("POST /api/subscription/verify rejects missing transactionId", func(t *testing.T) {
+		w := doRequest(ts, http.MethodPost, "/api/subscription/verify", map[string]string{}, user.AccessToken)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("POST /api/subscription/verify returns 502 when app store client not configured", func(t *testing.T) {
+		body := dto.VerifySubscriptionRequest{TransactionID: "2000000123456789"}
+		w := doRequest(ts, http.MethodPost, "/api/subscription/verify", body, user.AccessToken)
+		assert.Equal(t, http.StatusBadGateway, w.Code)
+	})
+
+	t.Run("POST /api/subscription/verify rejects unauthenticated request", func(t *testing.T) {
+		body := dto.VerifySubscriptionRequest{TransactionID: "2000000123456789"}
+		w := doRequest(ts, http.MethodPost, "/api/subscription/verify", body, "")
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
+func TestIntegration_SubscriptionLazyExpiry(t *testing.T) {
+	ts := setupTestServer(t)
+	user := createTestUser(t, ts)
+
+	// Directly set user as premium with expired subscription
+	ctx := context.Background()
+	u, err := ts.userRepo.FindByID(ctx, user.ID)
+	require.NoError(t, err)
+
+	expired := time.Now().Add(-1 * time.Hour)
+	u.SubscriptionStatus = "premium"
+	u.SubscriptionExpiry = &expired
+	err = ts.userRepo.Update(ctx, u)
+	require.NoError(t, err)
+
+	t.Run("expired premium user is downgraded to free on status check", func(t *testing.T) {
+		w := doRequest(ts, http.MethodGet, "/api/subscription", nil, user.AccessToken)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		resp := parseJSON[dto.SubscriptionResponse](t, w)
+		assert.Equal(t, "free", resp.SubscriptionStatus)
+	})
+}
+
+func TestIntegration_VoiceParseLimit(t *testing.T) {
+	ts := setupTestServer(t)
+	user := createTestUser(t, ts)
+
+	// Free user can parse 3 times (even though AI returns 502, the limit check happens first)
+	for i := 0; i < 3; i++ {
+		body := dto.ParseVoiceRequest{Text: fmt.Sprintf("Meeting %d", i+1)}
+		w := doRequest(ts, http.MethodPost, "/api/events/parse-voice", body, user.AccessToken)
+		// 502 is expected because AI service is unavailable, but limit check passed
+		assert.Equal(t, http.StatusBadGateway, w.Code, "request %d should pass limit check", i+1)
+	}
+
+	t.Run("4th request returns 403 for free user", func(t *testing.T) {
+		// After 3 successful parsings (even if AI failed), count is NOT incremented
+		// because IncrementVoiceParseCount runs only after successful parsing.
+		// So with noopVoiceParsingService returning error, count stays at 0.
+		// We need to manually set the count to simulate 3 successful parses.
+		ctx := context.Background()
+		u, err := ts.userRepo.FindByID(ctx, user.ID)
+		require.NoError(t, err)
+
+		now := time.Now().UTC()
+		u.VoiceParseCount = 3
+		u.VoiceParseDate = &now
+		err = ts.userRepo.Update(ctx, u)
+		require.NoError(t, err)
+
+		body := dto.ParseVoiceRequest{Text: "Meeting 4"}
+		w := doRequest(ts, http.MethodPost, "/api/events/parse-voice", body, user.AccessToken)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+
+		problem := parseJSON[response.ProblemDetail](t, w)
+		assert.Contains(t, problem.Detail, "free voice parsing limit exceeded")
+	})
+
+	t.Run("premium user bypasses limit", func(t *testing.T) {
+		ctx := context.Background()
+		u, err := ts.userRepo.FindByID(ctx, user.ID)
+		require.NoError(t, err)
+
+		expiry := time.Now().Add(30 * 24 * time.Hour)
+		u.SubscriptionStatus = "premium"
+		u.SubscriptionExpiry = &expiry
+		u.VoiceParseCount = 100 // high count should not matter
+		err = ts.userRepo.Update(ctx, u)
+		require.NoError(t, err)
+
+		body := dto.ParseVoiceRequest{Text: "Meeting unlimited"}
+		w := doRequest(ts, http.MethodPost, "/api/events/parse-voice", body, user.AccessToken)
+		// 502 because AI unavailable, but NOT 403 — limit check passed
+		assert.Equal(t, http.StatusBadGateway, w.Code)
 	})
 }

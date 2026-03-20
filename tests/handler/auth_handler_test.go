@@ -48,7 +48,7 @@ func (m *mockAuthService) RefreshToken(ctx context.Context, refreshToken string)
 	return m.refreshTokenFn(ctx, refreshToken)
 }
 
-func (m *mockAuthService) Logout(ctx context.Context, userID uuid.UUID) error {
+func (m *mockAuthService) Logout(ctx context.Context, userID uuid.UUID, deviceToken string) error {
 	return m.logoutFn(ctx, userID)
 }
 

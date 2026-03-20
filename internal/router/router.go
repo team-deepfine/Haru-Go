@@ -14,6 +14,7 @@ func New(
 	eventHandler *handler.EventHandler,
 	voiceHandler *handler.VoiceHandler,
 	deviceTokenHandler *handler.DeviceTokenHandler,
+	subscriptionHandler *handler.SubscriptionHandler,
 ) *gin.Engine {
 	r := gin.New()
 
@@ -36,6 +37,7 @@ func New(
 	eventHandler.RegisterRoutes(protected)
 	voiceHandler.RegisterRoutes(protected)
 	deviceTokenHandler.RegisterRoutes(protected)
+	subscriptionHandler.RegisterRoutes(protected)
 
 	return r
 }

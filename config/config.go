@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
@@ -19,8 +20,10 @@ type Config struct {
 	LogLevel string
 	Gemini   GeminiConfig
 	JWT      JWTConfig
-	Apple AppleConfig
-	FCM   FCMConfig
+	Apple        AppleConfig
+	AppleIAP     AppleIAPConfig
+	FCM          FCMConfig
+	Subscription SubscriptionConfig
 }
 
 // DBConfig holds database connection settings.
@@ -53,6 +56,20 @@ type AppleConfig struct {
 	RedirectURI string
 }
 
+// AppleIAPConfig holds Apple In-App Purchase verification settings.
+type AppleIAPConfig struct {
+	IssuerID       string
+	KeyID          string
+	PrivateKeyPath string
+	BundleID       string
+	Environment    string // "sandbox" or "production"
+}
+
+// SubscriptionConfig holds subscription settings.
+type SubscriptionConfig struct {
+	VoiceParseLimit int
+}
+
 // Load reads configuration from environment variables (with .env fallback).
 func Load() *Config {
 	_ = godotenv.Load()
@@ -82,9 +99,19 @@ func Load() *Config {
 			PrivateKey:  getEnv("APPLE_PRIVATE_KEY", ""),
 			RedirectURI: getEnv("APPLE_REDIRECT_URI", ""),
 		},
+		AppleIAP: AppleIAPConfig{
+			IssuerID:       getEnv("APPLE_IAP_ISSUER_ID", ""),
+			KeyID:          getEnv("APPLE_IAP_KEY_ID", ""),
+			PrivateKeyPath: getEnv("APPLE_IAP_PRIVATE_KEY_PATH", ""),
+			BundleID:       getEnv("APPLE_IAP_BUNDLE_ID", ""),
+			Environment:    getEnv("APPLE_IAP_ENVIRONMENT", "sandbox"),
+		},
 		FCM: FCMConfig{
 			CredentialsFile: getEnv("FCM_CREDENTIALS_FILE", ""),
 			Enabled:         getEnv("FCM_ENABLED", "false") == "true",
+		},
+		Subscription: SubscriptionConfig{
+			VoiceParseLimit: getEnvInt("VOICE_PARSE_FREE_LIMIT", 3),
 		},
 	}
 }
@@ -92,6 +119,15 @@ func Load() *Config {
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
 	}
 	return fallback
 }
