@@ -10,7 +10,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/daewon/haru/pkg/applejwks"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -37,7 +36,6 @@ type Client struct {
 	bundleID     string
 	baseURL      string
 	httpClient   *http.Client
-	jwksVerifier *applejwks.Verifier
 }
 
 // NewClient creates a new App Store Server API client.
@@ -67,16 +65,13 @@ func NewClient(keyPath, keyID, issuerID, bundleID, environment string) (*Client,
 		baseURL = productionURL
 	}
 
-	jwksVerifier, _ := applejwks.NewVerifier()
-
 	return &Client{
-		privateKey:   ecKey,
-		keyID:        keyID,
-		issuerID:     issuerID,
-		bundleID:     bundleID,
-		baseURL:      baseURL,
-		httpClient:   &http.Client{Timeout: 10 * time.Second},
-		jwksVerifier: jwksVerifier,
+		privateKey: ecKey,
+		keyID:      keyID,
+		issuerID:   issuerID,
+		bundleID:   bundleID,
+		baseURL:    baseURL,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}, nil
 }
 

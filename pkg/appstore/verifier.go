@@ -1,11 +1,14 @@
 package appstore
 
 import (
+	"crypto/ecdsa"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/daewon/haru/pkg/applejwks"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // VerifiedTransaction holds the result of a verified Apple transaction.
@@ -61,22 +64,47 @@ func (c *Client) VerifyTransaction(transactionID string) (*VerifiedTransaction, 
 	return result, nil
 }
 
-// parseAndVerifyTransaction verifies the JWS signature against Apple's JWKS and extracts transaction info.
+// parseAndVerifyTransaction verifies the JWS signature using the x5c certificate chain
+// embedded in the JWS header and extracts transaction info.
 func (c *Client) parseAndVerifyTransaction(signedPayload string) (*TransactionInfo, error) {
-	if c.jwksVerifier == nil {
-		v, err := applejwks.NewVerifier()
-		if err != nil {
-			return nil, fmt.Errorf("apple jwks unavailable: %w", err)
+	token, err := jwt.Parse(signedPayload, func(token *jwt.Token) (interface{}, error) {
+		// App Store JWS uses ES256 with x5c certificate chain in the header
+		if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		c.jwksVerifier = v
-	}
 
-	claims, err := c.jwksVerifier.VerifyAndParse(signedPayload)
+		x5c, ok := token.Header["x5c"].([]interface{})
+		if !ok || len(x5c) == 0 {
+			return nil, fmt.Errorf("missing x5c header in JWS")
+		}
+
+		// Decode the first certificate (leaf) from the x5c chain
+		certDER, err := base64.StdEncoding.DecodeString(x5c[0].(string))
+		if err != nil {
+			return nil, fmt.Errorf("decode x5c certificate: %w", err)
+		}
+
+		cert, err := x509.ParseCertificate(certDER)
+		if err != nil {
+			return nil, fmt.Errorf("parse x5c certificate: %w", err)
+		}
+
+		ecKey, ok := cert.PublicKey.(*ecdsa.PublicKey)
+		if !ok {
+			return nil, fmt.Errorf("x5c certificate does not contain ECDSA public key")
+		}
+
+		return ecKey, nil
+	}, jwt.WithValidMethods([]string{"ES256"}))
 	if err != nil {
 		return nil, fmt.Errorf("verify transaction signature: %w", err)
 	}
 
-	// Marshal claims back to JSON to unmarshal into TransactionInfo
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok || !token.Valid {
+		return nil, fmt.Errorf("invalid token claims")
+	}
+
 	claimsJSON, err := json.Marshal(claims)
 	if err != nil {
 		return nil, fmt.Errorf("marshal claims: %w", err)
