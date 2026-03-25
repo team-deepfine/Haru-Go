@@ -29,6 +29,11 @@ func (h *SubscriptionHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/subscription", h.GetStatus)
 }
 
+// RegisterWebhookRoutes registers public webhook routes (no auth required).
+func (h *SubscriptionHandler) RegisterWebhookRoutes(rg *gin.RouterGroup) {
+	rg.POST("/apple/notifications", h.HandleAppleNotification)
+}
+
 // Verify handles POST /api/subscription/verify.
 func (h *SubscriptionHandler) Verify(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
@@ -67,6 +72,27 @@ func (h *SubscriptionHandler) GetStatus(c *gin.Context) {
 	}
 
 	response.JSON(c, http.StatusOK, resp)
+}
+
+// HandleAppleNotification handles POST /api/apple/notifications.
+func (h *SubscriptionHandler) HandleAppleNotification(c *gin.Context) {
+	var req struct {
+		SignedPayload string `json:"signedPayload" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "signedPayload is required")
+		return
+	}
+
+	if err := h.svc.HandleNotification(c.Request.Context(), req.SignedPayload); err != nil {
+		slog.Error("failed to handle apple notification", "error", err)
+		// Always return 200 to Apple — non-200 causes Apple to retry indefinitely.
+		// Errors are logged for investigation but should not trigger retries.
+		c.JSON(http.StatusOK, gin.H{"status": "error", "message": "logged for investigation"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func handleSubscriptionError(c *gin.Context, err error) {
