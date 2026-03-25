@@ -1,9 +1,6 @@
 package appstore
 
 import (
-	"crypto/ecdsa"
-	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -78,23 +75,7 @@ func (c *Client) parseAndVerifyTransaction(signedPayload string) (*TransactionIn
 			return nil, fmt.Errorf("missing x5c header in JWS")
 		}
 
-		// Decode the first certificate (leaf) from the x5c chain
-		certDER, err := base64.StdEncoding.DecodeString(x5c[0].(string))
-		if err != nil {
-			return nil, fmt.Errorf("decode x5c certificate: %w", err)
-		}
-
-		cert, err := x509.ParseCertificate(certDER)
-		if err != nil {
-			return nil, fmt.Errorf("parse x5c certificate: %w", err)
-		}
-
-		ecKey, ok := cert.PublicKey.(*ecdsa.PublicKey)
-		if !ok {
-			return nil, fmt.Errorf("x5c certificate does not contain ECDSA public key")
-		}
-
-		return ecKey, nil
+		return verifyX5cChain(x5c)
 	}, jwt.WithValidMethods([]string{"ES256"}))
 	if err != nil {
 		return nil, fmt.Errorf("verify transaction signature: %w", err)

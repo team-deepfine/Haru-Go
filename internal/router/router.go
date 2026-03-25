@@ -29,6 +29,7 @@ func New(
 
 	// Public routes (no auth required)
 	authHandler.RegisterPublicRoutes(api)
+	subscriptionHandler.RegisterWebhookRoutes(api)
 
 	// Protected routes (auth required)
 	protected := api.Group("")
