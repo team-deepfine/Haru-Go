@@ -32,7 +32,7 @@ jobs:
           MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
           REPO="${{ github.repository }}"
 
-          CONTENT="PR #${PR_NUMBER} merged to main by ${MERGED_BY}\n${PR_TITLE}\n${PR_URL}"
+          CONTENT="<@1486012422480203937> PR #${PR_NUMBER} merged to main by ${MERGED_BY}\n${PR_TITLE}\n${PR_URL}"
 
           curl -s -X POST "$DISCORD_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
